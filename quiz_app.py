@@ -3,10 +3,9 @@ import re
 import random
 from pypdf import PdfReader
 
-# --- 1. ฟังก์ชันซ่อมฟอนต์ไทย ---
+# --- 1. ฟังก์ชันซ่อมฟอนต์ไทย (สมบูรณ์) ---
 def fix_thai_text(text):
     if not text: return ""
-    
     text = re.sub(r'\s+้า', '้ำ', text)
     text = re.sub(r'\s+่า', '่ำ', text)
     text = re.sub(r'\s+๊า', '๊ำ', text)
@@ -25,7 +24,7 @@ def fix_thai_text(text):
     text = re.sub(r' +', ' ', text)
     return text.strip()
 
-# --- 2. ฟังก์ชันโหลด PDF ---
+# --- 2. ฟังก์ชันโหลด PDF (เปลี่ยนระบบสับข้อใหม่ ป้องกันช้อยส์หลอก) ---
 @st.cache_data
 def load_quiz_from_pdf(file_path):
     try:
@@ -34,14 +33,14 @@ def load_quiz_from_pdf(file_path):
         for page in reader.pages:
             page_text = page.extract_text()
             if page_text:
-                # --- เพิ่มใหม่: ลบตัวเลขโดดๆ ที่อยู่บรรทัดเดียว (ซึ่งก็คือเลขหน้ากระดาษ) ---
+                # ลบตัวเลขหน้ากระดาษที่ลอยอยู่บรรทัดเดียว
                 page_text = re.sub(r'^\s*\d+\s*$', '', page_text, flags=re.MULTILINE)
                 full_text += page_text + " "
 
-        # --- เพิ่มใหม่: ลบหัวกระดาษ พร้อมดักจับเลขหน้าที่อาจจะติดมาด้วย ---
+        # ลบหัวกระดาษ
         full_text = re.sub(r'\d*\s*ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข\s*\d*', '', full_text)
 
-        # ซ่อมตัวอักษร
+        # ซ่อมฟอนต์
         full_text = fix_thai_text(full_text)
 
         # แยกส่วนข้อสอบกับเฉลย
@@ -53,55 +52,64 @@ def load_quiz_from_pdf(file_path):
             exam_part = full_text
             answer_part = ""
 
-        # ตัดหัวกระดาษ เริ่มที่ข้อ 1.
-        start_match = re.search(r'\b1\.\s+', exam_part)
-        if start_match:
-            exam_part = exam_part[start_match.start():]
-
-        # สกัดคำตอบ
+        # สกัดคำตอบ (เฉลย)
         ans_map = {}
         ans_matches = re.findall(r'(\d+)\s*[\.]\s*([ก-ง])', answer_part)
         for num, ans in ans_matches:
             ans_map[int(num)] = ans
 
         parsed_data = []
-        raw_blocks = re.split(r'\b(\d+)\.\s+', exam_part)
         
-        for i in range(1, len(raw_blocks)-1, 2):
-            q_num_str = raw_blocks[i]
-            q_content = raw_blocks[i+1]
+        # ค้นหาโครงสร้างข้อสอบที่สมบูรณ์เท่านั้น ป้องกันการตัดผิดพลาดตรง "ง. ข้อ 1 ถูก"
+        # หากลุ่มคำ: (เลขข้อ). (โจทย์) ก. (ช้อย) ข. (ช้อย) ค. (ช้อย) ง.
+        pattern = re.compile(
+            r'(?:^|\s)(\d+)\s*\.\s+(.*?)\s+ก\s*\.\s+(.*?)\s+ข\s*\.\s+(.*?)\s+ค\s*\.\s+(.*?)\s+ง\s*\.\s+', 
+            re.S
+        )
+        matches = list(pattern.finditer(exam_part))
+        
+        for i in range(len(matches)):
+            m = matches[i]
+            q_num_str = m.group(1)
+            q_text_raw = m.group(2)
+            opt_g_raw = m.group(3)
+            opt_kh_raw = m.group(4)
+            opt_k_raw = m.group(5)
             
             try:
                 q_num = int(q_num_str)
             except ValueError:
                 continue
-
-            opt_match = re.search(r'(.*?)\s+ก\.\s+(.*?)\s+ข\.\s+(.*?)\s+ค\.\s+(.*?)\s+ง\.\s+(.*)', q_content, re.S)
-            
-            if opt_match:
-                # ซ่อมฟอนต์อีกรอบในระดับข้อ เพื่อความชัวร์
-                q_text = fix_thai_text(opt_match.group(1))
-                options = [
-                    fix_thai_text(opt_match.group(2)),
-                    fix_thai_text(opt_match.group(3)),
-                    fix_thai_text(opt_match.group(4)),
-                    fix_thai_text(opt_match.group(5))
-                ]
                 
-                ans_letter = ans_map.get(q_num)
-                correct_text = ""
-                if ans_letter == 'ก': correct_text = options[0]
-                elif ans_letter == 'ข': correct_text = options[1]
-                elif ans_letter == 'ค': correct_text = options[2]
-                elif ans_letter == 'ง': correct_text = options[3]
+            # ตัวเลือก ง. จะดึงข้อความตั้งแต่จบคำว่า "ง." ไปจนถึงจุดเริ่มต้นของข้อถัดไป
+            # ทำให้มั่นใจได้ว่าข้อความไม่ขาดหายและไม่ไปกวนข้ออื่น
+            if i + 1 < len(matches):
+                opt_ng_raw = exam_part[m.end():matches[i+1].start()]
+            else:
+                opt_ng_raw = exam_part[m.end():]
+                
+            q_text = fix_thai_text(q_text_raw)
+            options = [
+                fix_thai_text(opt_g_raw),
+                fix_thai_text(opt_kh_raw),
+                fix_thai_text(opt_k_raw),
+                fix_thai_text(opt_ng_raw)
+            ]
+            
+            ans_letter = ans_map.get(q_num)
+            correct_text = ""
+            if ans_letter == 'ก': correct_text = options[0]
+            elif ans_letter == 'ข': correct_text = options[1]
+            elif ans_letter == 'ค': correct_text = options[2]
+            elif ans_letter == 'ง': correct_text = options[3]
 
-                if correct_text:
-                    parsed_data.append({
-                        "id": q_num,
-                        "question": q_text,
-                        "options": options,
-                        "answer": correct_text
-                    })
+            if correct_text:
+                parsed_data.append({
+                    "id": q_num,
+                    "question": q_text,
+                    "options": options,
+                    "answer": correct_text
+                })
         return parsed_data
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาด: {e}")
