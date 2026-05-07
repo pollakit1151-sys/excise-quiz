@@ -6,17 +6,14 @@ from pypdf import PdfReader
 # --- 1. ฟังก์ชันซ่อมฟอนต์ไทย ---
 def fix_thai_text(text):
     if not text: return ""
-    # ซ่อมแซม สระอำ ที่แยกส่วน
     text = re.sub(r'([ก-ฮ])([\u0e48-\u0e4c]?)\s+า', r'\1\2ำ', text)
     text = re.sub(r'([ก-ฮ])\s+([\u0e48-\u0e4c]?)า', r'\1\2ำ', text)
     text = text.replace('\u0e4d\u0e32', 'ำ').replace('\u0e4d \u0e32', 'ำ')
     text = text.replace('ํ า', 'ำ').replace('ํา', 'ำ').replace(' า', 'ำ')
-    # ลบช่องว่างส่วนเกิน
     text = re.sub(r' +', ' ', text)
     return text.strip()
 
-# --- 2. ฟังก์ชันโหลด PDF (ใช้ตรรกะตัดคำตามที่คุณแนะนำ) ---
-@st.cache_data
+# --- 2. ฟังก์ชันโหลด PDF (เอา @st.cache_data ออก เพื่อบังคับให้อ่านไฟล์ใหม่ทุกครั้ง) ---
 def load_quiz_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
@@ -24,20 +21,16 @@ def load_quiz_from_pdf(file_path):
         for page in reader.pages:
             page_text = page.extract_text()
             if page_text:
-                # ลบเลขหน้าที่ลอยอยู่บรรทัดเดียว
                 page_text = re.sub(r'^\s*\d+\s*$', '', page_text, flags=re.MULTILINE)
-                full_text += page_text + " " # ใช้ช่องว่างต่อบรรทัด ป้องกันคำขาด
+                full_text += page_text + " "
 
-        # ลบหัวกระดาษทิ้ง
         full_text = re.sub(r'\d*\s*ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข\s*\d*', '', full_text)
         full_text = fix_thai_text(full_text)
 
-        # แยกส่วนข้อสอบ กับ เฉลยท้ายเล่ม
         split_match = re.search(r'เฉลยข้อสอบ|เฉลยท้ายเล่ม|เฉลย\s*\d+', full_text)
         exam_part = full_text[:split_match.start()] if split_match else full_text
         answer_part = full_text[split_match.start():] if split_match else ""
 
-        # สกัดคำตอบ (เช่น 1.ข)
         ans_map = {}
         ans_matches = re.findall(r'(\d+)\s*[\.]\s*([ก-ง])', answer_part)
         for num, ans in ans_matches:
@@ -45,29 +38,23 @@ def load_quiz_from_pdf(file_path):
 
         parsed_data = []
         
-        # --- จุดสำคัญ: สับแบ่งข้อความด้วย (ช่องว่าง หรือ ต้นข้อความ) + เลขข้อ + จุด ---
-        # วิธีนี้จะแก้ปัญหาข้อ 6 ไปต่อท้ายข้อ 5 ได้ 100%
-        raw_blocks = re.split(r'(?:^|\s+)(\d+)\.\s+', exam_part)
+        # ปรับการดักจับข้อให้แม่นยำขึ้น โดยมองหา ตัวเลข + จุด แล้วกวาดไปจนกว่าจะเจอตัวเลขถัดไป
+        matches = re.finditer(r'(?:^|\s+)(\d+)\.\s+(.*?)(?=\s+\d+\.\s+|$)', exam_part, re.S)
         
-        for i in range(1, len(raw_blocks)-1, 2):
-            q_num_str = raw_blocks[i]
-            q_content = raw_blocks[i+1] # ข้อความของข้อนี้ทั้งหมด (รวม ก ข ค ง แล้ว)
+        for match in matches:
+            q_num = int(match.group(1))
+            q_content = match.group(2)
             
-            try:
-                q_num = int(q_num_str)
-            except ValueError:
-                continue
-
-            # --- จุดสำคัญ 2: ให้หน้า ก. คือโจทย์ และ หลัง ก.ข.ค.ง. คือตัวเลือก ---
+            # ตัด ก ข ค ง ด้วยเงื่อนไขที่เข้มงวดขึ้น
             opt_match = re.search(r'(.*?)(?:^|\s+)ก\.\s+(.*?)(?:^|\s+)ข\.\s+(.*?)(?:^|\s+)ค\.\s+(.*?)(?:^|\s+)ง\.\s+(.*)', q_content, re.S)
             
             if opt_match:
                 q_text = fix_thai_text(opt_match.group(1))
                 options = [
-                    fix_thai_text(opt_match.group(2)), # หลัง ก.
-                    fix_thai_text(opt_match.group(3)), # หลัง ข.
-                    fix_thai_text(opt_match.group(4)), # หลัง ค.
-                    fix_thai_text(opt_match.group(5))  # หลัง ง.
+                    fix_thai_text(opt_match.group(2)),
+                    fix_thai_text(opt_match.group(3)),
+                    fix_thai_text(opt_match.group(4)),
+                    fix_thai_text(opt_match.group(5))
                 ]
                 
                 ans_letter = ans_map.get(q_num)
@@ -96,10 +83,9 @@ def main():
     all_data = load_quiz_from_pdf(pdf_file)
 
     if not all_data:
-        st.warning("ระบบกำลังโหลดหรือหาไฟล์ PDF ไม่เจอ กรุณาเช็คชื่อไฟล์บน GitHub")
+        st.warning("กำลังโหลดข้อสอบ หรือหาไฟล์ PDF ไม่เจอ...")
         return
 
-    # Session State
     if 'remaining_questions' not in st.session_state:
         st.session_state.remaining_questions = all_data.copy()
         st.session_state.done_count = 0
