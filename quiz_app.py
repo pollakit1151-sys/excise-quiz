@@ -3,29 +3,39 @@ import re
 import random
 from pypdf import PdfReader
 
-# --- 1. ฟังก์ชันซ่อมฟอนต์ไทยและจัดการช่องว่าง ---
+# --- 1. ฟังก์ชันซ่อมฟอนต์ไทย (ปรับปรุงพิเศษเพื่อแก้ปัญหา "น ้า" -> "น้ำ") ---
 def fix_thai_text(text):
     if not text: return ""
-    # แก้ไขสระอำและไม้ไต่คู้ที่เพี้ยนจาก PDF
-    text = text.replace('\u0e4d\u0e32', 'ำ').replace('ํ า', 'ำ').replace('ํา', 'ำ')
-    # ลบช่องว่างที่เกินมาและบรรทัดว่าง
-    text = re.sub(r'\s+', ' ', text)
+    
+    # รวม นิคหิต (ํ) กับ สระอา (า) ที่แยกกันแบบมีช่องว่าง ให้เป็น สระอำ (ำ)
+    # เช่น น้ํ า -> น้ำ
+    text = re.sub(r'\u0e4d\s*\u0e32', 'ำ', text)
+    
+    # แก้ปัญหา "น ้า" หรือ "น้ า" (พยัญชนะ/วรรณยุกต์ + ช่องว่าง + สระอา)
+    # โดยการลบช่องว่างที่อยู่หน้า สระอา (า) ถ้าข้างหน้าเป็นตัวอักษรไทยหรือวรรณยุกต์
+    text = re.sub(r'([ก-ฮ\u0e48-\u0e4c])\s+\u0e32', r'\1า', text)
+    
+    # กรณีสระอำรูปแบบอื่นๆ ที่มักเพี้ยน
+    text = text.replace('ํ า', 'ำ').replace('ํา', 'ำ').replace('\u0e4d\u0e32', 'ำ')
+    
+    # จัดการช่องว่างส่วนเกินแต่ยังคงเว้นวรรคปกติไว้
+    text = re.sub(r' +', ' ', text)
     return text.strip()
 
-# --- 2. ฟังก์ชันโหลด PDF แบบสับแบ่งทีละข้อ (แก้ปัญหาข้อติดกัน) ---
+# --- 2. ฟังก์ชันโหลด PDF แบบสับแบ่งข้อความ ---
 @st.cache_data
 def load_quiz_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
         full_text = ""
         for page in reader.pages:
-            # ใช้ช่องว่างแทนการขึ้นบรรทัดใหม่ เพื่อป้องกันการตัดคำผิดพลาด
+            # ใช้ช่องว่างคั่นระหว่างบรรทัดเพื่อป้องกันการตัดคำ
             full_text += page.extract_text() + " "
 
-        # ซ่อมตัวอักษรก่อนจัดการ
+        # ซ่อมตัวอักษรก่อนเริ่มกระบวนการแยกข้อ
         full_text = fix_thai_text(full_text)
 
-        # แยกส่วนข้อสอบกับเฉลยออกจากกัน
+        # แยกส่วนข้อสอบกับเฉลย
         split_match = re.search(r'เฉลยข้อสอบ|เฉลยท้ายเล่ม|เฉลย\s*\d+', full_text)
         if split_match:
             exam_part = full_text[:split_match.start()]
@@ -34,12 +44,12 @@ def load_quiz_from_pdf(file_path):
             exam_part = full_text
             answer_part = ""
 
-        # ตัดหัวกระดาษ: หาจุดเริ่มต้นที่แท้จริงของข้อ 1.
+        # ตัดหัวกระดาษ เริ่มที่ข้อ 1.
         start_match = re.search(r'\b1\.\s+', exam_part)
         if start_match:
             exam_part = exam_part[start_match.start():]
 
-        # สกัดคำตอบท้ายไฟล์
+        # สกัดคำตอบ (เฉลย)
         ans_map = {}
         ans_matches = re.findall(r'(\d+)\s*[\.]\s*([ก-ง])', answer_part)
         for num, ans in ans_matches:
@@ -47,7 +57,7 @@ def load_quiz_from_pdf(file_path):
 
         parsed_data = []
         
-        # ตัดแบ่งข้อความตามตัวเลขข้อ (เช่น 1., 2., 3. ...)
+        # แบ่งข้อความตามตัวเลขข้อ
         raw_blocks = re.split(r'\b(\d+)\.\s+', exam_part)
         
         for i in range(1, len(raw_blocks)-1, 2):
@@ -59,16 +69,17 @@ def load_quiz_from_pdf(file_path):
             except ValueError:
                 continue
 
-            # สกัดหา ก. ข. ค. ง. ในข้อความก้อนนั้นๆ
+            # สกัดหา ก. ข. ค. ง.
             opt_match = re.search(r'(.*?)\s+ก\.\s+(.*?)\s+ข\.\s+(.*?)\s+ค\.\s+(.*?)\s+ง\.\s+(.*)', q_content, re.S)
             
             if opt_match:
-                q_text = opt_match.group(1).strip()
+                # ทำความสะอาดโจทย์อีกรอบหลังสกัด
+                q_text = fix_thai_text(opt_match.group(1))
                 options = [
-                    opt_match.group(2).strip(),
-                    opt_match.group(3).strip(),
-                    opt_match.group(4).strip(),
-                    opt_match.group(5).strip()
+                    fix_thai_text(opt_match.group(2)),
+                    fix_thai_text(opt_match.group(3)),
+                    fix_thai_text(opt_match.group(4)),
+                    fix_thai_text(opt_match.group(5))
                 ]
                 
                 ans_letter = ans_map.get(q_num)
@@ -87,17 +98,17 @@ def load_quiz_from_pdf(file_path):
                     })
         return parsed_data
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
+        st.error(f"เกิดข้อผิดพลาด: {e}")
         return []
 
-# --- 3. ส่วนการทำงานหลักของแอป ---
+# --- 3. ส่วนการทำงานของแอป ---
 def main():
     st.set_page_config(page_title="App ข้อสอบสรรพสามิต 60", layout="centered")
     pdf_file = "ข้อสอบ พรบ.60 (399)ชุดไม่เฉลย.pdf"
     all_data = load_quiz_from_pdf(pdf_file)
 
     if not all_data:
-        st.warning("ระบบกำลังโหลดข้อสอบหรือหาข้อสอบไม่เจอ กรุณาตรวจสอบชื่อไฟล์ PDF บน GitHub")
+        st.warning("ระบบกำลังโหลดหรือหาไฟล์ PDF ไม่เจอ กรุณาเช็คชื่อไฟล์บน GitHub")
         return
 
     # Session State
@@ -124,7 +135,7 @@ def main():
             st.session_state.clear()
             st.rerun()
 
-    # ดึงโจทย์ใหม่
+    # ดึงโจทย์ชุดใหม่
     if not st.session_state.current_quiz_set and st.session_state.remaining_questions:
         batch_size = min(len(st.session_state.remaining_questions), num_to_draw)
         if do_shuffle_q:
@@ -144,7 +155,7 @@ def main():
         st.session_state.user_ans = {}
         st.session_state.submitted = False
 
-    # แสดงผลข้อสอบ
+    # แสดงข้อสอบ
     if st.session_state.current_quiz_set:
         with st.form("quiz_form"):
             for i, q in enumerate(st.session_state.current_quiz_set):
@@ -179,7 +190,7 @@ def main():
                 st.rerun()
     else:
         st.balloons()
-        st.header("🎉 ยินดีด้วย! ทำครบทุกข้อแล้ว")
+        st.header("🎉 ยินดีด้วย! คุณทำข้อสอบครบทุกข้อแล้ว")
 
 if __name__ == "__main__":
     main()
