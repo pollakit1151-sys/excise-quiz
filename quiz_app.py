@@ -4,14 +4,18 @@ import re
 import random
 from pypdf import PdfReader
 
-# --- ฟังก์ชันสั่งให้เบราว์เซอร์เลื่อนขึ้นบนสุดอัตโนมัติ ---
+# --- ฟังก์ชันสั่งให้เบราว์เซอร์เลื่อนขึ้นบนสุดอัตโนมัติ (อัปเกรดให้เลื่อนสุด 100%) ---
 def scroll_to_top():
     components.html(
         """
         <script>
-            var body = window.parent.document.querySelector(".main");
-            if (body) { body.scrollTo(0, 0); }
-            window.parent.scrollTo(0, 0);
+            // ค้นหาทุกกล่องเนื้อหาของ Streamlit แล้วสั่งเลื่อนขึ้นไปพิกัด 0 แบบทันที
+            const containers = window.parent.document.querySelectorAll('.main, [data-testid="stAppViewContainer"], [data-testid="stMain"]');
+            containers.forEach(container => {
+                container.scrollTo({ top: 0, behavior: 'auto' });
+            });
+            window.parent.scrollTo({ top: 0, behavior: 'auto' });
+            window.scrollTo({ top: 0, behavior: 'auto' });
         </script>
         """,
         height=0
@@ -110,7 +114,7 @@ def main():
         st.session_state.current_quiz_set = []
 
     st.title("🎯 ฝึกทำข้อสอบ พรบ.สรรพสามิต 60")
-    st.write(f"โหลดได้ทั้งหมด: {len(all_data)} ข้อ")
+    st.write(f"โหลดโจทย์ได้ทั้งหมด: {len(all_data)} ข้อ")
     
     progress_val = st.session_state.done_count / st.session_state.total_questions
     st.progress(progress_val)
@@ -152,7 +156,6 @@ def main():
             
             if st.form_submit_button("✅ ส่งข้อสอบชุดนี้"):
                 st.session_state.submitted = True
-                # ลบ scroll_to_top ออกจากที่นี่ เพื่อให้อยู่ดูเฉลยก่อน
                 st.rerun()
 
         if st.session_state.submitted:
@@ -170,12 +173,11 @@ def main():
             
             st.success(f"ชุดนี้ได้คะแนน: {score} / {len(st.session_state.current_quiz_set)}")
             
-            # ปุ่มไปต่อ: จะเลื่อนกลับไปบนสุดเพื่อทำชุดถัดไป
             if st.button("➡️ ทำข้อสอบชุดถัดไป"):
                 st.session_state.done_count += len(st.session_state.current_quiz_set)
                 st.session_state.current_quiz_set = [] 
                 st.session_state.submitted = False
-                st.session_state.do_scroll_top = True # เปิดใช้งานการเลื่อนขึ้นเฉพาะปุ่มนี้
+                st.session_state.do_scroll_top = True # สั่งเลื่อนขึ้น
                 st.rerun()
     else:
         st.balloons()
