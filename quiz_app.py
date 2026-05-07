@@ -3,7 +3,18 @@ import re
 import random
 from pypdf import PdfReader
 
-# --- 1. ฟังก์ชันโหลด PDF ---
+# --- 1. ฟังก์ชันพิเศษสำหรับซ่อมฟอนต์ภาษาไทยที่เพี้ยน ---
+def fix_thai_text(text):
+    if not text:
+        return ""
+    # แก้ไขสระอำที่แยกส่วน (ํ + า -> ำ)
+    text = text.replace('\u0e4d\u0e32', 'ำ')
+    # แก้ไขกรณีมีช่องว่างแทรกระหว่างสระ (ํ า -> ำ)
+    text = text.replace('ํ า', 'ำ')
+    # ลบช่องว่างที่เกินมาจากการสกัดข้อความ (มักเกิดในภาษาไทย)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
 @st.cache_data
 def load_quiz_from_pdf(file_path):
     try:
@@ -11,6 +22,9 @@ def load_quiz_from_pdf(file_path):
         full_text = ""
         for page in reader.pages:
             full_text += page.extract_text() + "\n"
+
+        # ซ่อมตัวอักษรทั้งไฟล์ก่อนเริ่มจัดการ
+        full_text = fix_thai_text(full_text)
 
         parts = re.split(r'เฉลยข้อสอบ|เฉลยท้ายเล่ม', full_text)
         exam_text = parts[0]
@@ -26,14 +40,16 @@ def load_quiz_from_pdf(file_path):
         parsed_data = []
         for match in q_pattern.finditer(exam_text):
             q_num = int(match.group(1))
-            raw_question = match.group(2).strip().replace('\n', ' ')
+            
+            # ดึงโจทย์และตัวเลือก พร้อมทำความสะอาดตัวอักษรอีกรอบ
+            raw_question = fix_thai_text(match.group(2))
             clean_question = re.sub(r'^\d+\.\s*', '', raw_question)
             
             options = [
-                match.group(3).strip().replace('\n', ' '),
-                match.group(4).strip().replace('\n', ' '),
-                match.group(5).strip().replace('\n', ' '),
-                match.group(6).strip().replace('\n', ' ')
+                fix_thai_text(match.group(3)),
+                fix_thai_text(match.group(4)),
+                fix_thai_text(match.group(5)),
+                fix_thai_text(match.group(6))
             ]
             
             ans_letter = ans_map.get(q_num)
@@ -60,10 +76,9 @@ def main():
     all_data = load_quiz_from_pdf(pdf_file)
 
     if not all_data:
-        st.error("ไม่พบไฟล์ PDF หรือไฟล์มีปัญหา กรุณาตรวจสอบชื่อไฟล์บน GitHub")
+        st.error("ไม่พบไฟล์ PDF หรือไฟล์มีปัญหา")
         return
 
-    # --- 2. ระบบ Session State ---
     if 'remaining_questions' not in st.session_state:
         st.session_state.remaining_questions = all_data.copy()
         st.session_state.done_count = 0
@@ -76,39 +91,31 @@ def main():
 
     st.title("🎯 ฝึกทำข้อสอบ พรบ.สรรพสามิต 60")
     
-    # ความก้าวหน้า
     progress = st.session_state.done_count / st.session_state.total_questions
     st.progress(progress)
-    st.write(f"ทำไปแล้ว {st.session_state.done_count} จากทั้งหมด {st.session_state.total_questions} ข้อ")
+    st.write(f"ความคืบหน้า: {st.session_state.done_count} / {st.session_state.total_questions} ข้อ")
 
-    # --- 3. Sidebar (ตั้งค่า) ---
     with st.sidebar:
-        st.header("⚙️ ตั้งค่าการทำข้อสอบ")
+        st.header("⚙️ ตั้งค่า")
         num_to_draw = st.number_input("จำนวนข้อต่อรอบ", 1, 50, 10)
         st.divider()
         do_shuffle_q = st.checkbox("สุ่มลำดับข้อสอบ", value=True)
-        do_shuffle_opt = st.checkbox("สุ่มลำดับ ก-ง (ในแต่ละข้อ)", value=True)
+        do_shuffle_opt = st.checkbox("สุ่มลำดับตัวเลือก (ก-ง)", value=True)
         st.divider()
-        if st.button("🔄 เริ่มใหม่ทั้งหมด (ล้างประวัติ)"):
+        if st.button("🔄 เริ่มใหม่ทั้งหมด"):
             st.session_state.clear()
             st.rerun()
 
-    # --- 4. Logic ดึงข้อสอบใหม่ ---
     if not st.session_state.current_quiz_set and st.session_state.remaining_questions:
         batch_size = min(len(st.session_state.remaining_questions), num_to_draw)
-        
-        # เลือกข้อสอบ (สุ่ม หรือ เรียง)
         if do_shuffle_q:
             selected = random.sample(st.session_state.remaining_questions, batch_size)
         else:
-            # เรียงตามลำดับ ID ที่เหลืออยู่
             temp_list = sorted(st.session_state.remaining_questions, key=lambda x: x['id'])
             selected = temp_list[:batch_size]
         
-        # ตัดข้อที่เลือกแล้วออกจากคลัง
         st.session_state.remaining_questions = [q for q in st.session_state.remaining_questions if q not in selected]
         
-        # เตรียมตัวเลือก (สุ่ม หรือ เรียง)
         for q in selected:
             d_opts = q['options'].copy()
             if do_shuffle_opt:
@@ -119,14 +126,11 @@ def main():
         st.session_state.user_ans = {}
         st.session_state.submitted = False
 
-    # --- 5. หน้าแสดงผล ---
     if st.session_state.current_quiz_set:
         with st.form("quiz_form"):
             for i, q in enumerate(st.session_state.current_quiz_set):
-                # ลบ (ID: ) ออก แสดงแค่เลขลำดับ
                 st.subheader(f"ข้อที่ {st.session_state.done_count + i + 1}")
                 st.write(q['question'])
-                
                 ans = st.radio("เลือกคำตอบ:", q['d_opts'], key=f"q_{q['id']}", index=None)
                 if ans:
                     st.session_state.user_ans[q['id']] = ans
@@ -136,7 +140,6 @@ def main():
                 st.session_state.submitted = True
                 st.rerun()
 
-        # ตรวจผลคะแนน
         if st.session_state.submitted:
             score = 0
             for q in st.session_state.current_quiz_set:
@@ -159,10 +162,7 @@ def main():
                 st.rerun()
     else:
         st.balloons()
-        st.header("🎉 ยินดีด้วย! คุณทำข้อสอบครบทุกข้อในคลังแล้ว")
-        if st.button("เริ่มใหม่อีกครั้ง"):
-            st.session_state.clear()
-            st.rerun()
+        st.header("🎉 ยินดีด้วย! คุณทำข้อสอบครบทุกข้อแล้ว")
 
 if __name__ == "__main__":
     main()
