@@ -13,7 +13,7 @@ def fix_thai_text(text):
     text = re.sub(r' +', ' ', text)
     return text.strip()
 
-# --- 2. ฟังก์ชันโหลด PDF (เอา @st.cache_data ออก เพื่อบังคับให้อ่านไฟล์ใหม่ทุกครั้ง) ---
+# --- 2. ฟังก์ชันโหลด PDF ---
 def load_quiz_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
@@ -24,7 +24,9 @@ def load_quiz_from_pdf(file_path):
                 page_text = re.sub(r'^\s*\d+\s*$', '', page_text, flags=re.MULTILINE)
                 full_text += page_text + " "
 
-        full_text = re.sub(r'\d*\s*ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข\s*\d*', '', full_text)
+        # --- จุดที่แก้ไข: ลบ \d* ด้านหลังออก ป้องกันไม่ให้มันไปลบเลขข้อ (เช่น 10.) ที่ตามมา ---
+        full_text = re.sub(r'\d*\s*ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข', '', full_text)
+        
         full_text = fix_thai_text(full_text)
 
         split_match = re.search(r'เฉลยข้อสอบ|เฉลยท้ายเล่ม|เฉลย\s*\d+', full_text)
@@ -38,14 +40,14 @@ def load_quiz_from_pdf(file_path):
 
         parsed_data = []
         
-        # ปรับการดักจับข้อให้แม่นยำขึ้น โดยมองหา ตัวเลข + จุด แล้วกวาดไปจนกว่าจะเจอตัวเลขถัดไป
+        # ตัดข้อความจากเลขข้อหนึ่ง ไปจนถึงก่อนเลขข้อถัดไป
         matches = re.finditer(r'(?:^|\s+)(\d+)\.\s+(.*?)(?=\s+\d+\.\s+|$)', exam_part, re.S)
         
         for match in matches:
             q_num = int(match.group(1))
             q_content = match.group(2)
             
-            # ตัด ก ข ค ง ด้วยเงื่อนไขที่เข้มงวดขึ้น
+            # สกัด ก. ข. ค. ง.
             opt_match = re.search(r'(.*?)(?:^|\s+)ก\.\s+(.*?)(?:^|\s+)ข\.\s+(.*?)(?:^|\s+)ค\.\s+(.*?)(?:^|\s+)ง\.\s+(.*)', q_content, re.S)
             
             if opt_match:
