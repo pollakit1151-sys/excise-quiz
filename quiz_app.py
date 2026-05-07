@@ -32,12 +32,14 @@ def load_quiz_from_pdf(file_path):
         reader = PdfReader(file_path)
         full_text = ""
         for page in reader.pages:
-            full_text += page.extract_text() + " "
+            page_text = page.extract_text()
+            if page_text:
+                # --- เพิ่มใหม่: ลบตัวเลขโดดๆ ที่อยู่บรรทัดเดียว (ซึ่งก็คือเลขหน้ากระดาษ) ---
+                page_text = re.sub(r'^\s*\d+\s*$', '', page_text, flags=re.MULTILINE)
+                full_text += page_text + " "
 
-        # --- ส่วนที่เพิ่มใหม่: ลบหัวกระดาษที่โผล่มาทุกหน้าทิ้งให้หมด ---
-        # ใช้ Regex ลบตั้งแต่คำว่า "ตัวอย่างข้อสอบ" จนถึง "สุรีย์ ศรีสุข" 
-        full_text = re.sub(r'ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข', '', full_text)
-        # --------------------------------------------------------
+        # --- เพิ่มใหม่: ลบหัวกระดาษ พร้อมดักจับเลขหน้าที่อาจจะติดมาด้วย ---
+        full_text = re.sub(r'\d*\s*ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข\s*\d*', '', full_text)
 
         # ซ่อมตัวอักษร
         full_text = fix_thai_text(full_text)
@@ -77,6 +79,7 @@ def load_quiz_from_pdf(file_path):
             opt_match = re.search(r'(.*?)\s+ก\.\s+(.*?)\s+ข\.\s+(.*?)\s+ค\.\s+(.*?)\s+ง\.\s+(.*)', q_content, re.S)
             
             if opt_match:
+                # ซ่อมฟอนต์อีกรอบในระดับข้อ เพื่อความชัวร์
                 q_text = fix_thai_text(opt_match.group(1))
                 options = [
                     fix_thai_text(opt_match.group(2)),
