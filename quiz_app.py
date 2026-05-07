@@ -3,36 +3,47 @@ import re
 import random
 from pypdf import PdfReader
 
-# --- 1. ฟังก์ชันซ่อมฟอนต์ไทย (ปรับปรุงพิเศษเพื่อแก้ปัญหา "น ้า" -> "น้ำ") ---
+# --- 1. ฟังก์ชันซ่อมฟอนต์ไทย (ปราบอาการ "น ้า" และ "ส าหรับ" เด็ดขาด) ---
 def fix_thai_text(text):
     if not text: return ""
     
-    # รวม นิคหิต (ํ) กับ สระอา (า) ที่แยกกันแบบมีช่องว่าง ให้เป็น สระอำ (ำ)
-    # เช่น น้ํ า -> น้ำ
-    text = re.sub(r'\u0e4d\s*\u0e32', 'ำ', text)
+    # ดักจับ: ช่องว่าง + วรรณยุกต์ + สระอา -> แปลงเป็น วรรณยุกต์ + สระอำ
+    # เช่น "น ้ามัน" -> "น้ำมัน"
+    text = re.sub(r'\s+้า', '้ำ', text)
+    text = re.sub(r'\s+่า', '่ำ', text)
+    text = re.sub(r'\s+๊า', '๊ำ', text)
+    text = re.sub(r'\s+๋า', '๋ำ', text)
+
+    # ดักจับ: วรรณยุกต์ + ช่องว่าง + สระอา -> แปลงเป็น วรรณยุกต์ + สระอำ
+    text = re.sub(r'้\s+า', '้ำ', text)
+    text = re.sub(r'่\s+า', '่ำ', text)
+    text = re.sub(r'๊\s+า', '๊ำ', text)
+    text = re.sub(r'๋\s+า', '๋ำ', text)
+
+    # ดักจับ: ช่องว่าง + สระอา -> แปลงเป็น สระอำ
+    # เช่น "ส าหรับ" -> "สำหรับ", "น าไป" -> "นำไป"
+    text = re.sub(r'\s+า', 'ำ', text)
     
-    # แก้ปัญหา "น ้า" หรือ "น้ า" (พยัญชนะ/วรรณยุกต์ + ช่องว่าง + สระอา)
-    # โดยการลบช่องว่างที่อยู่หน้า สระอา (า) ถ้าข้างหน้าเป็นตัวอักษรไทยหรือวรรณยุกต์
-    text = re.sub(r'([ก-ฮ\u0e48-\u0e4c])\s+\u0e32', r'\1า', text)
+    # กรณีสระอำถูกแยกชิ้นส่วนแบบอื่นๆ
+    text = text.replace('\u0e4d\u0e32', 'ำ')
+    text = text.replace('\u0e4d \u0e32', 'ำ')
+    text = text.replace('ํ า', 'ำ')
+    text = text.replace('ํา', 'ำ')
     
-    # กรณีสระอำรูปแบบอื่นๆ ที่มักเพี้ยน
-    text = text.replace('ํ า', 'ำ').replace('ํา', 'ำ').replace('\u0e4d\u0e32', 'ำ')
-    
-    # จัดการช่องว่างส่วนเกินแต่ยังคงเว้นวรรคปกติไว้
+    # จัดการช่องว่างส่วนเกิน
     text = re.sub(r' +', ' ', text)
     return text.strip()
 
-# --- 2. ฟังก์ชันโหลด PDF แบบสับแบ่งข้อความ ---
+# --- 2. ฟังก์ชันโหลด PDF ---
 @st.cache_data
 def load_quiz_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
         full_text = ""
         for page in reader.pages:
-            # ใช้ช่องว่างคั่นระหว่างบรรทัดเพื่อป้องกันการตัดคำ
             full_text += page.extract_text() + " "
 
-        # ซ่อมตัวอักษรก่อนเริ่มกระบวนการแยกข้อ
+        # ซ่อมตัวอักษรทันทีที่อ่านเสร็จ
         full_text = fix_thai_text(full_text)
 
         # แยกส่วนข้อสอบกับเฉลย
@@ -49,15 +60,13 @@ def load_quiz_from_pdf(file_path):
         if start_match:
             exam_part = exam_part[start_match.start():]
 
-        # สกัดคำตอบ (เฉลย)
+        # สกัดคำตอบ
         ans_map = {}
         ans_matches = re.findall(r'(\d+)\s*[\.]\s*([ก-ง])', answer_part)
         for num, ans in ans_matches:
             ans_map[int(num)] = ans
 
         parsed_data = []
-        
-        # แบ่งข้อความตามตัวเลขข้อ
         raw_blocks = re.split(r'\b(\d+)\.\s+', exam_part)
         
         for i in range(1, len(raw_blocks)-1, 2):
@@ -69,11 +78,9 @@ def load_quiz_from_pdf(file_path):
             except ValueError:
                 continue
 
-            # สกัดหา ก. ข. ค. ง.
             opt_match = re.search(r'(.*?)\s+ก\.\s+(.*?)\s+ข\.\s+(.*?)\s+ค\.\s+(.*?)\s+ง\.\s+(.*)', q_content, re.S)
             
             if opt_match:
-                # ทำความสะอาดโจทย์อีกรอบหลังสกัด
                 q_text = fix_thai_text(opt_match.group(1))
                 options = [
                     fix_thai_text(opt_match.group(2)),
@@ -101,7 +108,7 @@ def load_quiz_from_pdf(file_path):
         st.error(f"เกิดข้อผิดพลาด: {e}")
         return []
 
-# --- 3. ส่วนการทำงานของแอป ---
+# --- 3. การทำงานหลักของแอป ---
 def main():
     st.set_page_config(page_title="App ข้อสอบสรรพสามิต 60", layout="centered")
     pdf_file = "ข้อสอบ พรบ.60 (399)ชุดไม่เฉลย.pdf"
@@ -120,7 +127,6 @@ def main():
 
     st.title("🎯 ฝึกทำข้อสอบ พรบ.สรรพสามิต 60")
     
-    # Progress Bar
     progress = st.session_state.done_count / st.session_state.total_questions
     st.progress(progress)
     st.write(f"ทำไปแล้ว {st.session_state.done_count} จากทั้งหมด {st.session_state.total_questions} ข้อ")
@@ -135,7 +141,6 @@ def main():
             st.session_state.clear()
             st.rerun()
 
-    # ดึงโจทย์ชุดใหม่
     if not st.session_state.current_quiz_set and st.session_state.remaining_questions:
         batch_size = min(len(st.session_state.remaining_questions), num_to_draw)
         if do_shuffle_q:
@@ -155,7 +160,6 @@ def main():
         st.session_state.user_ans = {}
         st.session_state.submitted = False
 
-    # แสดงข้อสอบ
     if st.session_state.current_quiz_set:
         with st.form("quiz_form"):
             for i, q in enumerate(st.session_state.current_quiz_set):
