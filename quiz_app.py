@@ -1,7 +1,24 @@
 import streamlit as st
+import streamlit.components.v1 as components  # นำเข้าตัวเสริมสำหรับรันสคริปต์เลื่อนหน้าจอ
 import re
 import random
 from pypdf import PdfReader
+
+# --- ฟังก์ชันสั่งให้เบราว์เซอร์เลื่อนขึ้นบนสุดอัตโนมัติ ---
+def scroll_to_top():
+    components.html(
+        """
+        <script>
+            // ค้นหากรอบหน้าต่างหลักของ Streamlit แล้วสั่งให้เลื่อนไปที่พิกัด 0,0 (บนสุด)
+            var body = window.parent.document.querySelector(".main");
+            if (body) {
+                body.scrollTo(0, 0);
+            }
+            window.parent.scrollTo(0, 0);
+        </script>
+        """,
+        height=0
+    )
 
 # --- 1. ฟังก์ชันซ่อมฟอนต์ไทย ---
 def fix_thai_text(text):
@@ -78,9 +95,15 @@ def load_quiz_from_pdf(file_path):
         st.error(f"เกิดข้อผิดพลาด: {e}")
         return []
 
+# --- 3. การทำงานหลักของแอป ---
 def main():
-    # ลบ st.anchor ออกไปแล้วครับ
     st.set_page_config(page_title="App ข้อสอบสรรพสามิต 60", layout="centered")
+    
+    # ตรวจสอบคำสั่งให้เลื่อนหน้าจอขึ้นบนสุด
+    if 'do_scroll_top' in st.session_state and st.session_state.do_scroll_top:
+        scroll_to_top()
+        st.session_state.do_scroll_top = False # ทำเสร็จแล้วก็ปิดไว้
+        
     pdf_file = "ข้อสอบ พรบ.60 (399)ชุดไม่เฉลย.pdf"
     all_data = load_quiz_from_pdf(pdf_file)
 
@@ -140,6 +163,7 @@ def main():
             
             if st.form_submit_button("✅ ส่งข้อสอบชุดนี้"):
                 st.session_state.submitted = True
+                st.session_state.do_scroll_top = True # สั่งให้เลื่อนขึ้นบนตอนดูเฉลย
                 st.rerun()
 
         if st.session_state.submitted:
@@ -162,6 +186,7 @@ def main():
                 st.session_state.done_count += len(st.session_state.current_quiz_set)
                 st.session_state.current_quiz_set = [] 
                 st.session_state.submitted = False
+                st.session_state.do_scroll_top = True # สั่งให้เลื่อนขึ้นบนตอนทำชุดใหม่
                 st.rerun()
     else:
         st.balloons()
