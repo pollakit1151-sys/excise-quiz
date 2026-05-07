@@ -3,34 +3,25 @@ import re
 import random
 from pypdf import PdfReader
 
-# --- 1. ฟังก์ชันซ่อมฟอนต์ไทย (ปราบอาการ "น ้า" และ "ส าหรับ" เด็ดขาด) ---
+# --- 1. ฟังก์ชันซ่อมฟอนต์ไทย ---
 def fix_thai_text(text):
     if not text: return ""
     
-    # ดักจับ: ช่องว่าง + วรรณยุกต์ + สระอา -> แปลงเป็น วรรณยุกต์ + สระอำ
-    # เช่น "น ้ามัน" -> "น้ำมัน"
     text = re.sub(r'\s+้า', '้ำ', text)
     text = re.sub(r'\s+่า', '่ำ', text)
     text = re.sub(r'\s+๊า', '๊ำ', text)
     text = re.sub(r'\s+๋า', '๋ำ', text)
-
-    # ดักจับ: วรรณยุกต์ + ช่องว่าง + สระอา -> แปลงเป็น วรรณยุกต์ + สระอำ
     text = re.sub(r'้\s+า', '้ำ', text)
     text = re.sub(r'่\s+า', '่ำ', text)
     text = re.sub(r'๊\s+า', '๊ำ', text)
     text = re.sub(r'๋\s+า', '๋ำ', text)
-
-    # ดักจับ: ช่องว่าง + สระอา -> แปลงเป็น สระอำ
-    # เช่น "ส าหรับ" -> "สำหรับ", "น าไป" -> "นำไป"
     text = re.sub(r'\s+า', 'ำ', text)
     
-    # กรณีสระอำถูกแยกชิ้นส่วนแบบอื่นๆ
     text = text.replace('\u0e4d\u0e32', 'ำ')
     text = text.replace('\u0e4d \u0e32', 'ำ')
     text = text.replace('ํ า', 'ำ')
     text = text.replace('ํา', 'ำ')
     
-    # จัดการช่องว่างส่วนเกิน
     text = re.sub(r' +', ' ', text)
     return text.strip()
 
@@ -43,7 +34,12 @@ def load_quiz_from_pdf(file_path):
         for page in reader.pages:
             full_text += page.extract_text() + " "
 
-        # ซ่อมตัวอักษรทันทีที่อ่านเสร็จ
+        # --- ส่วนที่เพิ่มใหม่: ลบหัวกระดาษที่โผล่มาทุกหน้าทิ้งให้หมด ---
+        # ใช้ Regex ลบตั้งแต่คำว่า "ตัวอย่างข้อสอบ" จนถึง "สุรีย์ ศรีสุข" 
+        full_text = re.sub(r'ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข', '', full_text)
+        # --------------------------------------------------------
+
+        # ซ่อมตัวอักษร
         full_text = fix_thai_text(full_text)
 
         # แยกส่วนข้อสอบกับเฉลย
