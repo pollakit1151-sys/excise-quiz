@@ -24,9 +24,7 @@ def load_quiz_from_pdf(file_path):
                 page_text = re.sub(r'^\s*\d+\s*$', '', page_text, flags=re.MULTILINE)
                 full_text += page_text + " "
 
-        # --- จุดที่แก้ไข: ลบ \d* ด้านหลังออก ป้องกันไม่ให้มันไปลบเลขข้อ (เช่น 10.) ที่ตามมา ---
         full_text = re.sub(r'\d*\s*ตัวอย่างข้อสอบ.*?สุรีย์\s*ศรีสุข', '', full_text)
-        
         full_text = fix_thai_text(full_text)
 
         split_match = re.search(r'เฉลยข้อสอบ|เฉลยท้ายเล่ม|เฉลย\s*\d+', full_text)
@@ -39,15 +37,18 @@ def load_quiz_from_pdf(file_path):
             ans_map[int(num)] = ans
 
         parsed_data = []
+        seen_ids = set() # ตัวแปรใหม่: เอาไว้จำว่าดึงข้อไหนไปแล้วบ้าง
         
-        # ตัดข้อความจากเลขข้อหนึ่ง ไปจนถึงก่อนเลขข้อถัดไป
         matches = re.finditer(r'(?:^|\s+)(\d+)\.\s+(.*?)(?=\s+\d+\.\s+|$)', exam_part, re.S)
         
         for match in matches:
             q_num = int(match.group(1))
             q_content = match.group(2)
             
-            # สกัด ก. ข. ค. ง.
+            # กรองข้อซ้ำทิ้งทันที
+            if q_num in seen_ids:
+                continue
+                
             opt_match = re.search(r'(.*?)(?:^|\s+)ก\.\s+(.*?)(?:^|\s+)ข\.\s+(.*?)(?:^|\s+)ค\.\s+(.*?)(?:^|\s+)ง\.\s+(.*)', q_content, re.S)
             
             if opt_match:
@@ -67,6 +68,7 @@ def load_quiz_from_pdf(file_path):
                 elif ans_letter == 'ง': correct_text = options[3]
 
                 if correct_text:
+                    seen_ids.add(q_num) # บันทึกว่าข้อนี้ดึงไปแล้ว
                     parsed_data.append({
                         "id": q_num,
                         "question": q_text,
@@ -134,8 +136,12 @@ def main():
             for i, q in enumerate(st.session_state.current_quiz_set):
                 st.subheader(f"ข้อที่ {st.session_state.done_count + i + 1}")
                 st.write(q['question'])
-                ans = st.radio("เลือกคำตอบ:", q['d_opts'], key=f"q_{q['id']}", index=None)
-                if ans: st.session_state.user_ans[q['id']] = ans
+                
+                # --- จุดที่แก้ไข: เปลี่ยน key ให้ไม่ซ้ำกัน 100% ด้วยการพ่วงลำดับ (i) เข้าไป ---
+                unique_key = f"radio_{i}_{q['id']}"
+                ans = st.radio("เลือกคำตอบ:", q['d_opts'], key=unique_key, index=None)
+                
+                if ans: st.session_state.user_ans[unique_key] = ans
                 st.divider()
             
             if st.form_submit_button("✅ ส่งข้อสอบชุดนี้"):
@@ -144,13 +150,15 @@ def main():
 
         if st.session_state.submitted:
             score = 0
-            for q in st.session_state.current_quiz_set:
-                u_ans = st.session_state.user_ans.get(q['id'])
+            for i, q in enumerate(st.session_state.current_quiz_set):
+                unique_key = f"radio_{i}_{q['id']}"
+                u_ans = st.session_state.user_ans.get(unique_key)
+                
                 is_correct = (u_ans == q['answer'])
                 if is_correct: score += 1
                 
                 color = "green" if is_correct else "red"
-                st.markdown(f"**ข้อที่ {st.session_state.done_count + st.session_state.current_quiz_set.index(q) + 1}**")
+                st.markdown(f"**ข้อที่ {st.session_state.done_count + i + 1}**")
                 st.write(q['question'])
                 st.markdown(f"👉 คุณตอบ: {u_ans if u_ans else 'ไม่ได้ตอบ'} | เฉลยคือ: :{color}[{q['answer']}]")
             
