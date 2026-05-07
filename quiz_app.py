@@ -86,13 +86,16 @@ def main():
         st.warning("กำลังโหลดข้อสอบ...")
         return
 
-    # --- เตรียม Session State ---
+    # --- เตรียม Session State (แยกตัวแปรป้องกัน Error) ---
     if 'remaining_questions' not in st.session_state:
         st.session_state.remaining_questions = all_data.copy()
         st.session_state.done_count = 0
-        st.session_state.cumulative_score = 0 # คะแนนสะสมรวมทั้งหมด
         st.session_state.total_questions = len(all_data)
         st.session_state.current_quiz_set = []
+
+    # บังคับสร้างตัวแปรคะแนนสะสมเสมอถ้ายังไม่มี
+    if 'cumulative_score' not in st.session_state:
+        st.session_state.cumulative_score = 0
 
     st.title("🎯 ฝึกทำข้อสอบ พรบ.สรรพสามิต 60")
     
@@ -172,7 +175,6 @@ def main():
         st.header("🎉 ยินดีด้วย! คุณทำข้อสอบครบทุกข้อแล้ว")
         st.divider()
         
-        # คำนวณเปอร์เซ็นต์
         total = st.session_state.total_questions
         final_score = st.session_state.cumulative_score
         percentage = (final_score / total) * 100
