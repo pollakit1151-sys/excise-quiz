@@ -1,5 +1,5 @@
 import streamlit as st
-import streamlit.components.v1 as components  # นำเข้าตัวเสริมสำหรับรันสคริปต์เลื่อนหน้าจอ
+import streamlit.components.v1 as components
 import re
 import random
 from pypdf import PdfReader
@@ -9,11 +9,8 @@ def scroll_to_top():
     components.html(
         """
         <script>
-            // ค้นหากรอบหน้าต่างหลักของ Streamlit แล้วสั่งให้เลื่อนไปที่พิกัด 0,0 (บนสุด)
             var body = window.parent.document.querySelector(".main");
-            if (body) {
-                body.scrollTo(0, 0);
-            }
+            if (body) { body.scrollTo(0, 0); }
             window.parent.scrollTo(0, 0);
         </script>
         """,
@@ -61,20 +58,17 @@ def load_quiz_from_pdf(file_path):
         for match in matches:
             q_num = int(match.group(1))
             q_content = match.group(2)
-            
             if q_num in seen_ids: continue
                 
             opt_match = re.search(r'(.*?)(?:^|\s+)ก\.\s+(.*?)(?:^|\s+)ข\.\s+(.*?)(?:^|\s+)ค\.\s+(.*?)(?:^|\s+)ง\.\s+(.*)', q_content, re.S)
             
             if opt_match:
-                q_text = fix_thai_text(opt_match.group(1))
                 options = [
                     fix_thai_text(opt_match.group(2)),
                     fix_thai_text(opt_match.group(3)),
                     fix_thai_text(opt_match.group(4)),
                     fix_thai_text(opt_match.group(5))
                 ]
-                
                 ans_letter = ans_map.get(q_num)
                 correct_text = ""
                 if ans_letter == 'ก': correct_text = options[0]
@@ -86,23 +80,21 @@ def load_quiz_from_pdf(file_path):
                     seen_ids.add(q_num)
                     parsed_data.append({
                         "id": q_num,
-                        "question": q_text,
+                        "question": fix_thai_text(opt_match.group(1)),
                         "options": options,
                         "answer": correct_text
                     })
         return parsed_data
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาด: {e}")
         return []
 
-# --- 3. การทำงานหลักของแอป ---
 def main():
     st.set_page_config(page_title="App ข้อสอบสรรพสามิต 60", layout="centered")
     
-    # ตรวจสอบคำสั่งให้เลื่อนหน้าจอขึ้นบนสุด
-    if 'do_scroll_top' in st.session_state and st.session_state.do_scroll_top:
+    # เลื่อนขึ้นบนสุดเฉพาะเมื่อมีการสั่งผ่าน session_state
+    if st.session_state.get('do_scroll_top', False):
         scroll_to_top()
-        st.session_state.do_scroll_top = False # ทำเสร็จแล้วก็ปิดไว้
+        st.session_state.do_scroll_top = False
         
     pdf_file = "ข้อสอบ พรบ.60 (399)ชุดไม่เฉลย.pdf"
     all_data = load_quiz_from_pdf(pdf_file)
@@ -118,15 +110,14 @@ def main():
         st.session_state.current_quiz_set = []
 
     st.title("🎯 ฝึกทำข้อสอบ พรบ.สรรพสามิต 60")
+    st.write(f"โหลดได้ทั้งหมด: {len(all_data)} ข้อ")
     
     progress_val = st.session_state.done_count / st.session_state.total_questions
     st.progress(progress_val)
     st.write(f"ทำไปแล้ว {st.session_state.done_count} จากทั้งหมด {st.session_state.total_questions} ข้อ")
 
     with st.sidebar:
-        st.header("⚙️ ตั้งค่า")
         num_to_draw = st.number_input("จำนวนข้อต่อรอบ", 1, 50, 10)
-        st.divider()
         do_shuffle_q = st.checkbox("สุ่มลำดับข้อสอบ", value=True)
         if st.button("🔄 เริ่มใหม่ทั้งหมด"):
             st.session_state.clear()
@@ -156,14 +147,12 @@ def main():
                 
                 unique_key = f"radio_{i}_{q['id']}"
                 ans = st.radio("เลือกคำตอบ:", display_options, key=unique_key, index=None)
-                
-                if ans:
-                    st.session_state.user_ans[unique_key] = ans[3:] 
+                if ans: st.session_state.user_ans[unique_key] = ans[3:] 
                 st.divider()
             
             if st.form_submit_button("✅ ส่งข้อสอบชุดนี้"):
                 st.session_state.submitted = True
-                st.session_state.do_scroll_top = True # สั่งให้เลื่อนขึ้นบนตอนดูเฉลย
+                # ลบ scroll_to_top ออกจากที่นี่ เพื่อให้อยู่ดูเฉลยก่อน
                 st.rerun()
 
         if st.session_state.submitted:
@@ -171,7 +160,6 @@ def main():
             for i, q in enumerate(st.session_state.current_quiz_set):
                 unique_key = f"radio_{i}_{q['id']}"
                 u_ans = st.session_state.user_ans.get(unique_key)
-                
                 is_correct = (u_ans == q['answer'])
                 if is_correct: score += 1
                 
@@ -182,15 +170,16 @@ def main():
             
             st.success(f"ชุดนี้ได้คะแนน: {score} / {len(st.session_state.current_quiz_set)}")
             
+            # ปุ่มไปต่อ: จะเลื่อนกลับไปบนสุดเพื่อทำชุดถัดไป
             if st.button("➡️ ทำข้อสอบชุดถัดไป"):
                 st.session_state.done_count += len(st.session_state.current_quiz_set)
                 st.session_state.current_quiz_set = [] 
                 st.session_state.submitted = False
-                st.session_state.do_scroll_top = True # สั่งให้เลื่อนขึ้นบนตอนทำชุดใหม่
+                st.session_state.do_scroll_top = True # เปิดใช้งานการเลื่อนขึ้นเฉพาะปุ่มนี้
                 st.rerun()
     else:
         st.balloons()
-        st.header("🎉 ยินดีด้วย! คุณทำข้อสอบครบทุกข้อแล้ว")
+        st.header("🎉 ยินดีด้วย! ทำข้อสอบครบทุกข้อแล้ว")
 
 if __name__ == "__main__":
     main()
